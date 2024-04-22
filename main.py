@@ -1,19 +1,69 @@
-import time
 import math
 import ffmpeg
 
 from faster_whisper import WhisperModel
+from fastapi import FastAPI, File, status
+from fastapi.responses import HTMLResponse
+from fastapi.templating import Jinja2Templates
+from fastapi import UploadFile
+from fastapi.responses import RedirectResponse
+from fastapi import Request
+from fastapi.responses import StreamingResponse
+import cv2
+import subprocess
 
 input_video = "input.mp4"
 input_video_name = input_video.replace(".mp4", "")
+CHUNK_SIZE = 1024 * 1024
+templates = Jinja2Templates(directory='templates')
+
+app = FastAPI()
 
 
-def extract_audio():
-    extracted_audio = f"audio-{input_video_name}.wav"
+@app.get('/', response_class=HTMLResponse)
+def main(request: Request):
+    return templates.TemplateResponse('index.html', {'request': request})
+
+
+@app.post('/upload')
+def uploadMp4_video(file: UploadFile = File(...)):
+    file_data = file.file
+
+    with open("input.mp4", "wb+") as f:
+        f.write(file_data.read())
+
+    extracted_audio = extract_audio(input_video)
+    language, segments = transcribe(audio=extracted_audio)
+    subtitle_file = generate_subtitle_file(
+        language=language,
+        segments=segments
+    )
+    add_subtitle_to_video(input_video, subtitle_file, "output-input.mp4")
+    redirect_url = "http://localhost:8000/output"
+    return RedirectResponse(redirect_url, status_code=status.HTTP_303_SEE_OTHER)
+
+
+@app.get("/video")
+async def video_endpoint():
+    def iterfile():
+        with open("output-input.mp4", mode="rb") as file_like:
+            yield from file_like
+
+    return StreamingResponse(iterfile(), media_type="video/mp4")
+
+
+@app.get("/output")
+async def read_root(request: Request):
+    return templates.TemplateResponse("video.html", context={"request": request})
+
+
+def extract_audio(input_video):
+    extracted_audio = f"audio-{input_video.replace(".mp4", "")}.wav"
     stream = ffmpeg.input(input_video)
     stream = ffmpeg.output(stream, extracted_audio)
     ffmpeg.run(stream, overwrite_output=True)
     return extracted_audio
+
 
 def transcribe(audio):
     model = WhisperModel("small")
@@ -29,7 +79,6 @@ def transcribe(audio):
 
 
 def format_time(seconds):
-
     hours = math.floor(seconds / 3600)
     seconds %= 3600
     minutes = math.floor(seconds / 60)
@@ -58,39 +107,32 @@ def generate_subtitle_file(language, segments):
 
     return subtitle_file
 
-def add_subtitle_to_video(soft_subtitle, subtitle_file,  subtitle_language):
+def check_subtitles(video_path):
+    video = cv2.VideoCapture(video_path)
+    while video.isOpened():
+        ret, frame = video.read()
+        if not ret:
+            break
+        subtitles_present = True
 
-    video_input_stream = ffmpeg.input(input_video)
-    subtitle_input_stream = ffmpeg.input(subtitle_file)
+        if subtitles_present:
+            print("Subtitles found in the video.")
+            break
+
+    video.release()
+
+
+def add_subtitle_to_video(video_path, subtitle_path, output_path):
     output_video = f"output-{input_video_name}.mp4"
-    subtitle_track_title = subtitle_file.replace(".srt", "")
 
-    if soft_subtitle:
-        stream = ffmpeg.output(
-            video_input_stream, subtitle_input_stream, output_video, **{"c": "copy", "c:s": "mov_text"},
-            **{"metadata:s:s:0": f"language={subtitle_language}",
-            "metadata:s:s:0": f"title={subtitle_track_title}"}
-        )
-        ffmpeg.run(stream, overwrite_output=True)
-    else:
-        stream = ffmpeg.output(video_input_stream, output_video,
+    # Command to add subtitles using ffmpeg
+    ffmpeg_cmd = [
+        'ffmpeg',
+        '-i', video_path,
+        '-vf', f"subtitles='{subtitle_path}'",
+        output_video
+    ]
 
-                               vf=f"subtitles={subtitle_file}")
-
-        ffmpeg.run(stream, overwrite_output=True)
-
-
-def run():
-    extracted_audio = extract_audio()
-    language, segments = transcribe(audio=extracted_audio)
-    subtitle_file = generate_subtitle_file(
-        language=language,
-        segments=segments
-    )
-
-    add_subtitle_to_video(
-        soft_subtitle=True,
-        subtitle_file=subtitle_file,
-        subtitle_language=language
-    )
-run()
+    # Run ffmpeg command
+    subprocess.run(ffmpeg_cmd)
+    return output_path
