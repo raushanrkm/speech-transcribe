@@ -38,7 +38,9 @@ def uploadMp4_video(file: UploadFile = File(...)):
         language=language,
         segments=segments
     )
-    add_subtitle_to_video(input_video, subtitle_file, "output-input.mp4")
+    subtitle_color = "yellow"
+    overwrite= True
+    add_subtitle_to_video(input_video, subtitle_file, subtitle_color, overwrite)
     redirect_url = "http://localhost:8000/output"
     return RedirectResponse(redirect_url, status_code=status.HTTP_303_SEE_OTHER)
 
@@ -107,6 +109,7 @@ def generate_subtitle_file(language, segments):
 
     return subtitle_file
 
+
 def check_subtitles(video_path):
     video = cv2.VideoCapture(video_path)
     while video.isOpened():
@@ -122,17 +125,18 @@ def check_subtitles(video_path):
     video.release()
 
 
-def add_subtitle_to_video(video_path, subtitle_path, output_path):
-    output_video = f"output-{input_video_name}.mp4"
+def add_subtitle_to_video(video_path, subtitle_path, subtitle_color="yellow", overwrite=True):
+    output_path = f"output-{input_video_name}.mp4"
+    output_format = "mp4"
 
     # Command to add subtitles using ffmpeg
     ffmpeg_cmd = [
         'ffmpeg',
         '-i', video_path,
-        '-vf', f"subtitles='{subtitle_path}'",
-        output_video
+        '-vf', f"subtitles='{subtitle_path}':force_style='Fontcolor={subtitle_color}'",
+        '-y' if overwrite else '',  # Add '-y' option to overwrite the output file if overwrite is True
+        '-f', output_format,  # Specify the output format
+        output_path
     ]
-
-    # Run ffmpeg command
     subprocess.run(ffmpeg_cmd)
     return output_path
