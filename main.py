@@ -58,13 +58,24 @@ async def video_endpoint():
 async def read_root(request: Request):
     return templates.TemplateResponse("video.html", context={"request": request})
 
-
-def extract_audio(input_video):
     extracted_audio = f"audio-{input_video.replace(".mp4", "")}.wav"
-    stream = ffmpeg.input(input_video)
-    stream = ffmpeg.output(stream, extracted_audio)
-    ffmpeg.run(stream, overwrite_output=True)
-    return extracted_audio
+
+def extract_audio(video_path):
+    # Command to extract audio using ffmpeg
+    output_audio_path = f"audio-{video_path.replace(".mp4", "")}.wav"
+    overwrite=True
+    ffmpeg_cmd = [
+        'ffmpeg',
+        '-i', video_path,
+        '-y' if overwrite else '',
+        '-vn',  # Disable video recording
+        '-acodec', 'copy',  # Copy the audio codec
+        output_audio_path
+    ]
+
+    # Run ffmpeg command
+    subprocess.run(ffmpeg_cmd)
+    return output_audio_path
 
 
 def transcribe(audio):
